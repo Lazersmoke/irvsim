@@ -37,22 +37,18 @@ instance Show Ballot where
   show (Ballot []) = "Empty Ballot"
   show (Ballot cs) = ("Ballot: "++) . intercalate ", " . map show $ cs
 
-instance Show Election where
-  show (Election cs []) = "Candidates were: " ++ intercalate ", " (map show cs) ++ "No votes in the election"
-  show (Election cs bs) = "Candidates were: " ++ intercalate ", " (map show cs) ++ "\n  " ++ intercalate "\n  " (map show bs)
-
 writeElection :: Election -> Log ()
 writeElection (Election [] _) = do
   write "No Candidates Remain!"
   write "You should check that the file parsed correctly"
 writeElection (Election cs []) = do
   write "No votes remaining"
-  write "Remaining Candidates:"
+  write "Remaining Candidates"
   write $ intercalate ", " (map show cs)
 writeElection (Election cs bs) = do
-  write "Remaining Candidates:"
+  write "Remaining Candidates"
   indent 2 . write $ intercalate ", " (map show cs)
-  write "Tallies for Candidates:"
+  write "Tallies for Candidates"
   indent 2 $ forM_ cs fancyWrite
   where
     fancyWrite c = 
@@ -78,10 +74,10 @@ lexString :: String -> Parser String
 lexString = lexeme . string
 
 election :: Parser Election
-election = Election <$> candidate `sepBy` lexString "|" <*> ballot `endBy1` lexString "\n"
+election = Election <$> candidate `sepBy` lexString "|" <*> (filter (/= Ballot []) <$> ballot `endBy1` lexString "\n")
 
 ballot :: Parser Ballot
-ballot = Ballot <$> candidate `sepBy` lexString ","
+ballot = Ballot . nub <$> candidate `sepBy` lexString ","
 
 candidate :: Parser Candidate
 candidate = Candidate <$> lexeme (many1 (alphaNum <|> oneOf ['_','.']))
@@ -91,7 +87,7 @@ resolveElection :: Election -> Log (Maybe Candidate)
 resolveElection (Election _ []) = pure Nothing
 -- If there are ballots, then
 resolveElection e@(Election cs bs) = do
-  write "Resolving Election:"
+  write "Resolving Election"
   indent 2 $ writeElection e
   -- If anyone has more than half the votes then they win
   if percent topVoted > (1%2)
@@ -120,15 +116,15 @@ tally [] _ = 0
 eliminate :: Candidate -> Election -> Log Election
 eliminate c (Election cs bs) = 
   Election
-    <$> pure (delete c cs) 
-    <*> mapM moveVote bs <* write ("Eliminating " ++ show c ++ " from the election")
+    <$> pure (filter (/=c) cs) 
+    <*> (write ("Eliminating " ++ show c ++ " from the election") *> (filter (/= Ballot []) <$> mapM moveVote bs))
   where
     -- There is somewhere to move this vote to
     moveVote (Ballot (x:xs)) = 
       if c == x 
-        then Ballot <$> pure xs <*
+        then Ballot <$> pure (filter (/=c) xs) <*
           case xs of 
-            (y:_) -> write ("Moving vote from " ++ show c ++ " to " ++ show y) 
-            [] -> write ("Vote for " ++ show c ++ " has no further candidate to move to, and is eliminated.") 
-        else Ballot <$> pure (x:xs)
+            (y:_) -> indent 2 $ write ("Moving vote from " ++ show c ++ " to " ++ show y) 
+            [] -> indent 2 $ write ("Vote for " ++ show c ++ " has no further candidate to move to, and is eliminated.") 
+        else Ballot <$> pure (filter (/=c) (x:xs))
     moveVote (Ballot []) = pure $ Ballot []
